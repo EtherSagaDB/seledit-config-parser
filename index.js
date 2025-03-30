@@ -1,16 +1,55 @@
-const fs = require("fs");
+import { readFile, writeFile, mkdir } from "node:fs/promises";
+import path from "node:path";
+import { argv } from "node:process";
 
-fs.readFile("./ESO_502_Data_Menno.cfg", { encoding: "utf-8" }, (err, data) => {
-	let starterArray = data.split("\r\n");
-	let metaRemovedArray = starterArray.slice(3, starterArray.length);
-	let stringCleaning = metaRemovedArray.filter((v) => v != "");
-	// console.log(stringCleaning);
+async function main() {
+	const args = argv.slice(2);
+
+	let configData = await readConfig(args[0]);
+	let config = await parseConfig(configData);
+
+	let individualDir = "";
+	if (config.author == "Data") {
+		individualDir = `/out/${config.game}/${config.ver}/${Date.now()}`;
+	} else {
+		individualDir = `/out/${config.game}/${config.ver}/${config.author}/`;
+	}
+
+	await createDir(individualDir);
+	// write aio config
+	await writeFile(path.join(process.cwd(), `/out/${config.game}_${config.ver}_${config.author}_AIO.json`), JSON.stringify(config));
+
+	// write individual configs
+	for (const list of config.definitions) {
+		await writeFile(path.join(process.cwd(), individualDir, `${list.name}.json`), JSON.stringify(list));
+	}
+}
+
+async function readConfig(file) {
+	let configText = await readFile(file, { encoding: "utf-8" });
+	let fileArray = file.split("\\");
+	fileArray = fileArray[fileArray.length - 1].replace(".cfg", "").split("_");
+	let payload = {
+		game: fileArray[0],
+		ver: fileArray[1],
+		author: fileArray[fileArray.length - 1],
+		configText,
+	};
+	return payload;
+}
+
+async function parseConfig(configData) {
+	let starterArray = configData.configText.split("\r\n");
+	let totalTables = starterArray.shift();
+	let baseIndex = starterArray.shift(); // not sure on this one chief
+
+	let stringCleaning = starterArray.filter((v) => v != "");
 
 	let setLength = stringCleaning.length / 4;
 	let start = 0;
 	let end = 4;
 
-	let firstSweepData = [];
+	let firstSweep = [];
 
 	for (let i = 0; i < setLength; i++) {
 		let elements = stringCleaning.slice(start, end);
@@ -19,219 +58,93 @@ fs.readFile("./ESO_502_Data_Menno.cfg", { encoding: "utf-8" }, (err, data) => {
 			fields = elements[2],
 			fieldTypes = elements[3];
 
-		let object = {
+		let listDef = {
 			name: name,
 			offset: offset,
 			fields: fields,
-			fieldTypes,
-			fieldTypes,
+			fieldTypes: fieldTypes,
 		};
 
-		firstSweepData.push(object);
+		firstSweep.push(listDef);
 		start += 4;
 		end += 4;
 	}
-	let secondSweepData = [];
 
-	for (const list of firstSweepData) {
-		let object = {};
-		let fieldArray = [];
-		let fields = list.fields.split(";");
-		let fieldTypes = list.fieldTypes.split(";");
+	let secondSweep = [];
 
-		for (let i = 0; i < fields.length; i++) {
-			if (fields[i] == fields[i - 1]) {
+	for (const list of firstSweep) {
+		let fieldNames = list.fields.split(";");
+		let types = list.fieldTypes.split(";");
+
+		let name = list.name.split(" - ")[1],
+			id = list.name.split(" - ")[0],
+			offset = parseInt(list.offset),
+			fields = [];
+
+		for (let i = 0; i < fieldNames.length; i++) {
+			// I have no idea why I have this here but it was in the previous iteration for a reason.
+			if (fieldNames[i] == fieldNames[i - 1]) {
+				// console.log(fieldNames[i], fieldNames[i - 1]);
 				continue;
 			}
-			let field = {};
-			field.name = fields[i].replaceAll(" ", "");
 
-			if (fieldTypes[i].includes(":")) {
-				console.log(fieldTypes[i]);
-				let fieldTypesArray = fieldTypes[i].split(":");
-				field.type = fieldTypesArray[0];
-				field.length = fieldTypesArray[1];
-			} else {
-				field.type = fieldTypes[i];
+			let field = {
+				name: fieldNames[i],
+				type: "",
+				length: 0,
+			};
+
+			field.name = fieldNames[i].replaceAll(" ", "");
+
+			if (types[i].includes(":")) {
+				let typeSplit = types[i].split(":");
+				field.type = typeSplit[0];
+				field.length = parseInt(typeSplit[1]);
+
+				if (field.type === "wstring") {
+					field.type = "string";
+				}
+
+				fields.push(field);
+				continue;
 			}
 
-			fieldArray.push(field);
-		}
-
-		let nameArray = list.name.split("-"),
-			id = nameArray[0].trim(),
-			name = nameArray[1].trim();
-
-		object.name = name;
-		object.id = id;
-		object.offset = parseInt(list.offset);
-		object.fields = fieldArray;
-		secondSweepData.push(object);
-	}
-	// console.log(secondSweepData);
-	// for (const data of secondSweepData) {
-	//   if (data.name === "NPC_PROF_DEMOTION_SERVICE") {
-	//     monsterSucks(data);
-	//   }
-	// }
-
-	let writeData = JSON.stringify(secondSweepData);
-	// console.log(writeData);
-
-	fs.writeFile("./out/136.config.json", writeData, (err) => {
-		if (err) {
-			console.log(err);
-		}
-	});
-
-	for (const list of secondSweepData) {
-		writeData = JSON.stringify(list);
-		fs.writeFile(`./out/definitions/${list.name}.json`, writeData, (err) => {
-			if (err) {
-				console.log(err);
-			}
-		});
-	}
-	// createCSClasses(secondSweepData);
-});
-
-function createCSClasses(data) {
-	for (const list of data) {
-		let string = `public class ${list.name.replaceAll(" ", "").replaceAll("_", "")}\n\{\n`;
-		for (const field of list.fields) {
-			switch (field.type) {
+			switch (types[i]) {
 				case "int32":
-					field.type = "Int32";
-					break;
-				case "wstring:512":
-					field.type = "String";
-					break;
-				case "wstring:64":
-					field.type = "String";
-					break;
-				case "wstring:32":
-					field.type = "String";
-					break;
-				case "wstring:16":
-					field.type = "String";
-					break;
-				case "wstring:8":
-					field.type = "String";
-					break;
-				case "string:32":
-					field.type = "String";
-					break;
-				case "double":
-					field.type = "Double";
+					field.length = 4;
 					break;
 				case "float":
-					field.type = "float";
+					field.length = 4;
 					break;
-				case "byte:96":
-					field.type = "Byte[]";
+				case "double":
+					field.length = 8;
 					break;
-				case "byte:6980":
-					field.type = "Byte[]";
-					break;
-				case "byte:7808":
-					field.type = "Byte[]";
-					break;
-				case "byte:43826":
-					field.type = "Byte[]";
-					break;
-				default:
-					console.log(field.type);
 			}
-			string += `	public ${field.type} ${field.name.replaceAll(" ", "").replaceAll("%", "Percent").replaceAll("?", "")} {get; set;}\n`;
-		}
-		string += `}`;
 
-		fs.writeFile(`./old.definitions/${list.id} - ${list.name.replaceAll(" ", "").replaceAll("_", "")}.cs`, string, (e) => {
-			if (e) {
-				console.log(e);
-			}
-		});
-	}
-}
+			field.type = types[i];
+			fields.push(field);
+		}
 
-function monsterSucks(data) {
-	// for (const field of data.fields) {
-	for (let i = 0; i < data.fields.length; i++) {
-		let field = data.fields[i];
-		if (field.name == "Name") {
-			console.log(field.type);
-		}
-		let string = "";
-		switch (field.type) {
-			case "int32":
-				string += `data = reader.ReadBytes(4);\n${data.name.replaceAll(" ", "").replaceAll("_", "")}.${field.name.replaceAll(" ", "")} = BitConverter.ToInt32(data);\n\n`;
-				break;
-			case "Int32":
-				string += `data = reader.ReadBytes(4);\n${data.name.replaceAll(" ", "")}.${field.name.replaceAll(" ", "").replaceAll("_", "")} = BitConverter.ToInt32(data);\n\n`;
-				break;
-			case "wstring:512":
-				string += `data = reader.ReadBytes(512);\n${data.name.replaceAll(" ", "")}.${field.name.replaceAll(" ", "")} = Utils.StringParser(data);\n\n`;
-				break;
-			case "wstring:64":
-				string += `data = reader.ReadBytes(64);\n${data.name.replaceAll(" ", "").replaceAll("_", "")}.${field.name.replaceAll(" ", "")} = Utils.StringParser(data);\n\n`;
-				break;
-			case "wstring:32":
-				string += `data = reader.ReadBytes(32);\n${data.name.replaceAll(" ", "").replaceAll("_", "")}.${field.name.replaceAll(" ", "")} = Utils.StringParser(data);\n\n`;
-				break;
-			case "wstring:16":
-				string += `data = reader.ReadBytes(16);\n${data.name.replaceAll(" ", "").replaceAll("_", "")}.${field.name.replaceAll(" ", "")} = Utils.StringParser(data);\n\n`;
-				break;
-			case "wstring:8":
-				string += `data = reader.ReadBytes(8);\n${data.name.replaceAll(" ", "").replaceAll("_", "")}.${field.name.replaceAll(" ", "")} = Utils.StringParser(data);\n\n`;
-				break;
-			case "string:32":
-				string += `data = reader.ReadBytes(32);\n${data.name.replaceAll(" ", "").replaceAll("_", "")}.${field.name.replaceAll(" ", "")} = Utils.StringParser(data);\n\n`;
-				break;
-			case "String":
-				string += `data = reader.ReadBytes(32);\n${data.name.replaceAll(" ", "").replaceAll("_", "")}.${field.name.replaceAll(" ", "")} = Utils.StringParser(data);\n\n`;
-				break;
-			case "double":
-				string += `data = reader.ReadBytes(8);\n${data.name.replaceAll(" ", "").replaceAll("_", "")}.${field.name.replaceAll(" ", "")} = BitConverter.ToDouble(data);\n\n`;
-				break;
-			case "float":
-				string += `data = reader.ReadBytes(4);\n${data.name.replaceAll(" ", "").replaceAll("_", "")}.${field.name.replaceAll(" ", "")} = BitConverter.ToSingle(data);\n\n`;
-				break;
-			// case "byte:96":
-			//   field.type = "Byte[]";
-			//   break;
-			// case "byte:6980":
-			//   field.type = "Byte[]";
-			//   break;
-			// case "byte:7808":
-			//   field.type = "Byte[]";
-			//   break;
-			// case "byte:43826":
-			//   field.type = "Byte[]";
-			//   break;
-			default:
-				console.log("Monster:", field.type);
-		}
-		fs.appendFileSync(`./monsterFUCKdata.txt`, string, (e) => {
-			if (e) {
-				console.log(e);
-			}
+		secondSweep.push({
+			name,
+			id,
+			offset,
+			fields,
 		});
 	}
 
-	let firstString = "";
-	let secondString = "";
-	// for (const field of data.fields) {
-	for (let i = 0; i < data.fields.length; i++) {
-		let field = data.fields[i];
-		firstString += `${field.name.replaceAll(" ", "")},`;
-		secondString += `{type.${field.name.replaceAll(" ", "")}},`;
-	}
-
-	let string = firstString + "\n" + secondString;
-
-	fs.appendFileSync(`./monsterFUCK.txt`, string, (e) => {
-		if (e) {
-			console.log(e);
-		}
-	});
+	delete configData.configText;
+	configData.definitions = secondSweep;
+	return configData;
 }
+
+async function createDir(folderPath) {
+	try {
+		await mkdir(path.join(process.cwd(), folderPath), { recursive: true });
+		return;
+	} catch (e) {
+		return;
+	}
+}
+
+await main();
