@@ -6,7 +6,7 @@
   "type": "module",
   "scripts": {
     "start": "node index.js",
-    "dev": "nodemon --ignore ./out/*.json index.js"
+    "dev": "nodemon --ignore ./out/**/**/*.json index.js"
   },
   "private": true,
   "devDependencies": {
