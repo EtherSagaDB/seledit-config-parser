@@ -128,3 +128,6 @@ dist
 .yarn/build-state.yml
 .yarn/install-state.gz
 .pnp.*
+
+# ignore my test cfg
+configs/ESO_504_Data_Arc.cfg
